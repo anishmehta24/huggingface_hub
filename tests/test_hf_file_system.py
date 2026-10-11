@@ -15,6 +15,7 @@ import pytest
 
 from huggingface_hub import HfApi, constants, hf_file_system
 from huggingface_hub.errors import BucketNotFoundError, RepositoryNotFoundError, RevisionNotFoundError
+from huggingface_hub.hf_api import RepoFile, RepoFolder
 from huggingface_hub.hf_file_system import (
     HfFileSystem,
     HfFileSystemFile,
@@ -877,6 +878,21 @@ def test_resolve_path_with_non_matching_revisions():
     fs = HfFileSystem()
     with pytest.raises(ValueError):
         fs.resolve_path("username/my_model@dev", revision="main")
+
+
+def test_find_with_cached_parent_and_prefix_sibling_dirs():
+    # "data" is a string prefix of "data1": refreshing the cache from "data" alone would miss "data1"
+    fs = HfFileSystem(skip_instance_cache=True)
+    data, data1 = RepoFolder(path="data", oid="x"), RepoFolder(path="data1", oid="x")
+    a, b = RepoFile(path="data/a.txt", size=1, oid="x"), RepoFile(path="data1/b.txt", size=1, oid="x")
+    trees = {("", False): [data, data1], ("", True): [data, data1, a, b], ("data", True): [a], ("data1", True): [b]}
+
+    def _list_repo_tree(repo_id, path_in_repo, recursive, **kwargs):
+        return trees[(path_in_repo, recursive)]
+
+    with mock_repo_info(fs), patch.object(fs._api, "list_repo_tree", _list_repo_tree):
+        fs.ls("username/my_model")
+        assert fs.find("username/my_model") == ["username/my_model/data/a.txt", "username/my_model/data1/b.txt"]
 
 
 def test_stream_file_open_if_not_found():
