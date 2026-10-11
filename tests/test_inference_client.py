@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx2
 import numpy as np
 import pytest
 from PIL import Image
@@ -44,7 +45,7 @@ from huggingface_hub import (
     ZeroShotClassificationOutputElement,
     hf_hub_download,
 )
-from huggingface_hub.errors import HfHubHTTPError, ValidationError
+from huggingface_hub.errors import HfHubHTTPError, InferenceTimeoutError, ValidationError
 from huggingface_hub.inference._common import (
     MimeBytes,
     _as_url,
@@ -222,6 +223,14 @@ def test_feature_extraction_accepts_list_inputs():
     helper.prepare_request.assert_called_once()
     assert helper.prepare_request.call_args.kwargs["inputs"] == ["Hi, who are you?", "How are you?"]
     np.testing.assert_array_equal(embedding, np.array([[1.0, 2.0], [3.0, 4.0]], dtype="float32"))
+
+
+@patch("huggingface_hub.inference._client.get_session")
+def test_timeout_raises_inference_timeout_error(get_session_mock: MagicMock) -> None:
+    get_session_mock().stream.side_effect = httpx2.ReadTimeout("timed out")
+    client = InferenceClient(model="http://localhost:8080", timeout=1)
+    with pytest.raises(InferenceTimeoutError):
+        client.text_generation("test")
 
 
 def list_clients(task: str) -> list[pytest.param]:
