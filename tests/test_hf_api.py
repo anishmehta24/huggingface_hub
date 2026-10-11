@@ -4924,3 +4924,41 @@ def _to_snake_case(name: str) -> str:
     import re
 
     return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).replace("-", "_").lower()
+
+
+@pytest.mark.parametrize(
+    "method, kwargs",
+    [
+        ("list_pending_access_requests", {"repo_id": "user/repo"}),
+        ("accept_access_request", {"repo_id": "user/repo", "user": "someone"}),
+        ("grant_access", {"repo_id": "user/repo", "user": "someone"}),
+        ("get_webhook", {"webhook_id": "123"}),
+        ("list_webhooks", {}),
+        ("create_webhook", {"url": "https://example.com/hook", "watched": [{"type": "user", "name": "someone"}]}),
+        ("update_webhook", {"webhook_id": "123", "url": "https://example.com/hook"}),
+        ("enable_webhook", {"webhook_id": "123"}),
+        ("disable_webhook", {"webhook_id": "123"}),
+        ("delete_webhook", {"webhook_id": "123"}),
+        ("get_user_overview", {"username": "someone"}),
+        ("get_organization_overview", {"organization": "some-org"}),
+        ("list_organization_followers", {"organization": "some-org"}),
+        ("list_organization_members", {"organization": "some-org"}),
+        ("list_user_followers", {"username": "someone"}),
+        ("list_user_following", {"username": "someone"}),
+    ],
+)
+def test_requests_use_custom_endpoint(method: str, kwargs: dict) -> None:
+    api = HfApi(endpoint="https://hub.example.com", token="hf_fake")
+    session = Mock()
+    session.get.side_effect = session.post.side_effect = session.delete.side_effect = RuntimeError("stop")
+    with (
+        patch("huggingface_hub.hf_api.get_session", return_value=session),
+        patch("huggingface_hub.hf_api.paginate", side_effect=RuntimeError("stop")) as paginate,
+    ):
+        with pytest.raises(RuntimeError, match="stop"):
+            list(getattr(api, method)(**kwargs))  # consume generators
+
+    calls = session.get.call_args_list + session.post.call_args_list + session.delete.call_args_list
+    (call,) = calls + paginate.call_args_list
+    url = call.args[0] if call.args else call.kwargs["path"]
+    assert url.startswith("https://hub.example.com/api/")
